@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2019 the original author or authors.
+ * Copyright 2016-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,12 @@ package org.springframework.amqp.rabbit.listener;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
+import static org.awaitility.Awaitility.await;
 
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import org.springframework.amqp.core.Message;
@@ -32,9 +33,7 @@ import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.connection.RabbitUtils;
 import org.springframework.amqp.rabbit.connection.ShutDownChannelListener;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.junit.BrokerRunning;
 import org.springframework.amqp.rabbit.junit.RabbitAvailable;
-import org.springframework.amqp.rabbit.junit.RabbitAvailableCondition;
 import org.springframework.amqp.rabbit.listener.adapter.MessageListenerAdapter;
 import org.springframework.amqp.rabbit.listener.exception.FatalListenerStartupException;
 import org.springframework.context.ApplicationContext;
@@ -54,13 +53,6 @@ public class ContainerInitializationTests {
 	public static final String TEST_MISMATCH = "test.mismatch";
 
 	public static final String TEST_MISMATCH2 = "test.mismatch2";
-
-	public BrokerRunning brokerRunning = RabbitAvailableCondition.getBrokerRunning();
-
-	@AfterEach
-	public void tearDown() {
-		brokerRunning.purgeTestQueues();
-	}
 
 	@Test
 	public void testNoAdmin() {
@@ -99,11 +91,7 @@ public class ContainerInitializationTests {
 		latches[2].countDown(); // let container thread continue to enable restart
 		assertThat(latches[1].await(20, TimeUnit.SECONDS)).isTrue();
 		SimpleMessageListenerContainer container = context.getBean(SimpleMessageListenerContainer.class);
-		int n = 0;
-		while (n++ < 200 && container.isRunning()) {
-			Thread.sleep(100);
-		}
-		assertThat(container.isRunning()).isFalse();
+		await().atMost(Duration.ofSeconds(20)).until(() -> !container.isRunning());
 		context.close();
 	}
 
@@ -118,11 +106,7 @@ public class ContainerInitializationTests {
 		latches[2].countDown(); // let container thread continue to enable restart
 		assertThat(latches[1].await(20, TimeUnit.SECONDS)).isTrue();
 		SimpleMessageListenerContainer container = context.getBean(SimpleMessageListenerContainer.class);
-		int n = 0;
-		while (n++ < 200 && container.isRunning()) {
-			Thread.sleep(100);
-		}
-		assertThat(container.isRunning()).isFalse();
+		await().atMost(Duration.ofSeconds(20)).until(() -> !container.isRunning());
 		context.close();
 	}
 

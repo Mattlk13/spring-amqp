@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import org.springframework.amqp.AmqpAuthenticationException;
@@ -58,6 +58,7 @@ import org.springframework.amqp.core.MessagePostProcessor;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.ReceiveAndReplyCallback;
+import org.springframework.amqp.core.ReturnedMessage;
 import org.springframework.amqp.rabbit.connection.AbstractRoutingConnectionFactory;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.connection.ChannelProxy;
@@ -65,6 +66,7 @@ import org.springframework.amqp.rabbit.connection.PublisherCallbackChannel;
 import org.springframework.amqp.rabbit.connection.RabbitUtils;
 import org.springframework.amqp.rabbit.connection.SimpleRoutingConnectionFactory;
 import org.springframework.amqp.rabbit.connection.SingleConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate.ReturnsCallback;
 import org.springframework.amqp.support.converter.SimpleMessageConverter;
 import org.springframework.amqp.utils.SerializationUtils;
 import org.springframework.amqp.utils.test.TestUtils;
@@ -518,11 +520,64 @@ public class RabbitTemplateTests {
 		assertThat(afterReceivePostProcessors).containsExactly(mpp2, mpp3);
 	}
 
+	@Test
+	public void testPublisherConnWithInvoke() {
+		org.springframework.amqp.rabbit.connection.ConnectionFactory cf = mock(
+				org.springframework.amqp.rabbit.connection.ConnectionFactory.class);
+		org.springframework.amqp.rabbit.connection.ConnectionFactory pcf = mock(
+				org.springframework.amqp.rabbit.connection.ConnectionFactory.class);
+		given(cf.getPublisherConnectionFactory()).willReturn(pcf);
+		RabbitTemplate template = new RabbitTemplate(cf);
+		template.setUsePublisherConnection(true);
+		org.springframework.amqp.rabbit.connection.Connection conn = mock(
+				org.springframework.amqp.rabbit.connection.Connection.class);
+		Channel channel = mock(Channel.class);
+		given(pcf.createConnection()).willReturn(conn);
+		given(conn.isOpen()).willReturn(true);
+		given(conn.createChannel(false)).willReturn(channel);
+		template.invoke(t -> null);
+		verify(pcf).createConnection();
+		verify(conn).createChannel(false);
+	}
+
+	@Test
+	public void testPublisherConnWithInvokeInTx() {
+		org.springframework.amqp.rabbit.connection.ConnectionFactory cf = mock(
+				org.springframework.amqp.rabbit.connection.ConnectionFactory.class);
+		org.springframework.amqp.rabbit.connection.ConnectionFactory pcf = mock(
+				org.springframework.amqp.rabbit.connection.ConnectionFactory.class);
+		given(cf.getPublisherConnectionFactory()).willReturn(pcf);
+		RabbitTemplate template = new RabbitTemplate(cf);
+		template.setUsePublisherConnection(true);
+		template.setChannelTransacted(true);
+		org.springframework.amqp.rabbit.connection.Connection conn = mock(
+				org.springframework.amqp.rabbit.connection.Connection.class);
+		Channel channel = mock(Channel.class);
+		given(pcf.createConnection()).willReturn(conn);
+		given(conn.isOpen()).willReturn(true);
+		given(conn.createChannel(true)).willReturn(channel);
+		template.invoke(t -> null);
+		verify(pcf).createConnection();
+		verify(conn).createChannel(true);
+	}
+
+	@SuppressWarnings("deprecation")
+	@Test
+	public void testReturnsFallback() {
+		RabbitTemplate template = new RabbitTemplate();
+		AtomicBoolean called = new AtomicBoolean();
+		template.setReturnCallback((message, replyCode, replyText, exchange, routingKey) -> {
+			called.set(true);
+		});
+		ReturnsCallback cb = TestUtils.getPropertyValue(template, "returnsCallback", ReturnsCallback.class);
+		cb.returnedMessage(new ReturnedMessage(null, 0, null, null, null));
+		assertThat(called.get()).isTrue();
+	}
+
 	@SuppressWarnings("serial")
 	private class TestTransactionManager extends AbstractPlatformTransactionManager {
 
 		TestTransactionManager() {
-			super();
 		}
 
 		@Override

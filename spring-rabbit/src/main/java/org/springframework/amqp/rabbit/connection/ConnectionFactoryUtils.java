@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,6 @@ import com.rabbitmq.client.Channel;
 public final class ConnectionFactoryUtils {
 
 	private ConnectionFactoryUtils() {
-		super();
 	}
 
 	/**
@@ -148,7 +147,8 @@ public final class ConnectionFactoryUtils {
 			}
 			resourceHolderToUse.addChannel(channel, connection);
 
-			if (!resourceHolderToUse.equals(resourceHolder)) {
+			if (!resourceHolderToUse.equals(resourceHolder)
+					&& TransactionSynchronizationManager.isSynchronizationActive()) {
 				bindResourceToTransaction(resourceHolderToUse, connectionFactory,
 						resourceFactory.isSynchedLocalTransactionAllowed());
 			}
@@ -172,6 +172,7 @@ public final class ConnectionFactoryUtils {
 
 	public static RabbitResourceHolder bindResourceToTransaction(RabbitResourceHolder resourceHolder,
 			ConnectionFactory connectionFactory, boolean synched) {
+
 		if (TransactionSynchronizationManager.hasResource(connectionFactory)
 				|| !TransactionSynchronizationManager.isActualTransactionActive() || !synched) {
 			return (RabbitResourceHolder) TransactionSynchronizationManager.getResource(connectionFactory); // NOSONAR never null
@@ -205,6 +206,7 @@ public final class ConnectionFactoryUtils {
 	 */
 	public static Connection createConnection(final ConnectionFactory connectionFactory,
 			final boolean publisherConnectionIfPossible) {
+
 		if (publisherConnectionIfPossible) {
 			ConnectionFactory publisherFactory = connectionFactory.getPublisherConnectionFactory();
 			if (publisherFactory != null) {

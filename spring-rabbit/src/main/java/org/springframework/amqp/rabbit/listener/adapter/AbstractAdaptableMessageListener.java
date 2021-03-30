@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2019 the original author or authors.
+ * Copyright 2014-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,8 +32,8 @@ import org.springframework.amqp.core.Address;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessagePostProcessor;
 import org.springframework.amqp.core.MessageProperties;
-import org.springframework.amqp.rabbit.listener.ContainerUtils;
 import org.springframework.amqp.rabbit.listener.api.ChannelAwareMessageListener;
+import org.springframework.amqp.rabbit.listener.support.ContainerUtils;
 import org.springframework.amqp.rabbit.support.DefaultMessagePropertiesConverter;
 import org.springframework.amqp.rabbit.support.MessagePropertiesConverter;
 import org.springframework.amqp.rabbit.support.RabbitExceptionTranslator;
@@ -116,6 +116,12 @@ public abstract class AbstractAdaptableMessageListener implements ChannelAwareMe
 	private boolean isManualAck;
 
 	private boolean defaultRequeueRejected = true;
+
+	private ReplyPostProcessor replyPostProcessor;
+
+	private String replyContentType;
+
+	private boolean converterWinsContentType = true;
 
 	/**
 	 * Set the routing key to use when sending response messages.
@@ -240,6 +246,53 @@ public abstract class AbstractAdaptableMessageListener implements ChannelAwareMe
 		this.evalContext.setBeanResolver(beanResolver);
 		this.evalContext.setTypeConverter(new StandardTypeConverter());
 		this.evalContext.addPropertyAccessor(new MapAccessor());
+	}
+
+	/**
+	 * Set a {@link ReplyPostProcessor} to post process a response message before it is
+	 * sent. It is called after {@link #postProcessResponse(Message, Message)} which sets
+	 * up the correlationId header.
+	 * @param replyPostProcessor the post processor.
+	 * @since 2.2.5
+	 */
+	public void setReplyPostProcessor(ReplyPostProcessor replyPostProcessor) {
+		this.replyPostProcessor = replyPostProcessor;
+	}
+
+	/**
+	 * Get the reply content type.
+	 * @return the content type.
+	 * @since 2.3
+	 */
+	protected String getReplyContentType() {
+		return this.replyContentType;
+	}
+
+	/**
+	 * Set the reply content type.
+	 * @param replyContentType the content type.
+	 * @since 2.3
+	 */
+	public void setReplyContentType(String replyContentType) {
+		this.replyContentType = replyContentType;
+	}
+
+	/**
+	 * Return whether the content type set by a converter prevails or not.
+	 * @return false to always apply the reply content type.
+	 * @since 2.3
+	 */
+	protected boolean isConverterWinsContentType() {
+		return this.converterWinsContentType;
+	}
+
+	/**
+	 * Set whether the content type set by a converter prevails or not.
+	 * @param converterWinsContentType false to always apply the reply content type.
+	 * @since 2.3
+	 */
+	public void setConverterWinsContentType(boolean converterWinsContentType) {
+		this.converterWinsContentType = converterWinsContentType;
 	}
 
 	/**
@@ -375,8 +428,10 @@ public abstract class AbstractAdaptableMessageListener implements ChannelAwareMe
 					}
 				}
 			}
-			doHandleResult(new InvocationResult(deferredResult, resultArg.getSendTo(), returnType), request, channel,
-					source);
+			doHandleResult(
+					new InvocationResult(deferredResult, resultArg.getSendTo(), returnType, resultArg.getBean(),
+							resultArg.getMethod()),
+					request, channel, source);
 		}
 	}
 
@@ -407,7 +462,13 @@ public abstract class AbstractAdaptableMessageListener implements ChannelAwareMe
 		}
 		try {
 			Message response = buildMessage(channel, resultArg.getReturnValue(), resultArg.getReturnType());
+			MessageProperties props = response.getMessageProperties();
+			props.setTargetBean(resultArg.getBean());
+			props.setTargetMethod(resultArg.getMethod());
 			postProcessResponse(request, response);
+			if (this.replyPostProcessor != null) {
+				response = this.replyPostProcessor.apply(request, response);
+			}
 			Address replyTo = getReplyToAddress(request, source, resultArg);
 			sendResponse(channel, replyTo, response);
 		}
@@ -431,7 +492,7 @@ public abstract class AbstractAdaptableMessageListener implements ChannelAwareMe
 	protected Message buildMessage(Channel channel, Object result, Type genericType) {
 		MessageConverter converter = getMessageConverter();
 		if (converter != null && !(result instanceof Message)) {
-			return converter.toMessage(result, new MessageProperties(), genericType);
+			return convert(result, genericType, converter);
 		}
 		else {
 			if (!(result instanceof Message)) {
@@ -440,6 +501,26 @@ public abstract class AbstractAdaptableMessageListener implements ChannelAwareMe
 			}
 			return (Message) result;
 		}
+	}
+
+	/**
+	 * Convert to a message, with reply content type based on settings.
+	 * @param result the result.
+	 * @param genericType the type.
+	 * @param converter the converter.
+	 * @return the message.
+	 * @since 2.3
+	 */
+	protected Message convert(Object result, Type genericType, MessageConverter converter) {
+		MessageProperties messageProperties = new MessageProperties();
+		if (this.replyContentType != null) {
+			messageProperties.setContentType(this.replyContentType);
+		}
+		Message message = converter.toMessage(result, messageProperties, genericType);
+		if (this.replyContentType != null && !this.converterWinsContentType) {
+			message.getMessageProperties().setContentType(this.replyContentType);
+		}
+		return message;
 	}
 
 	/**
@@ -524,6 +605,7 @@ public abstract class AbstractAdaptableMessageListener implements ChannelAwareMe
 	 * @param replyTo the Rabbit ReplyTo string to use when sending. Currently interpreted to be the routing key.
 	 * @param messageIn the Rabbit message to send
 	 * @see #postProcessResponse(Message, Message)
+	 * @see #setReplyPostProcessor(ReplyPostProcessor)
 	 */
 	protected void sendResponse(Channel channel, Address replyTo, Message messageIn) {
 		Message message = messageIn;

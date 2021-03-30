@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +16,25 @@
 
 package org.springframework.amqp.rabbit.connection;
 
+import java.util.UUID;
+
 import org.springframework.amqp.core.Correlation;
 import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.ReturnedMessage;
 import org.springframework.lang.Nullable;
+import org.springframework.util.Assert;
 import org.springframework.util.concurrent.SettableListenableFuture;
 
 /**
- * Base class for correlating publisher confirms to sent messages.
- * Use the {@link org.springframework.amqp.rabbit.core.RabbitTemplate}
- * methods that include one of
- * these as a parameter; when the publisher confirm is received,
- * the CorrelationData is returned with the ack/nack.
+ * Base class for correlating publisher confirms to sent messages. Use the
+ * {@link org.springframework.amqp.rabbit.core.RabbitTemplate} methods that include one of
+ * these as a parameter; when the publisher confirm is received, the CorrelationData is
+ * returned with the ack/nack. When returns are also enabled, the
+ * {@link #setReturned(ReturnedMessage) returned} property will be populated when a
+ * message can't be delivered - the return always arrives before the confirmation. In this
+ * case the {@code #id} property must be set to a unique value. If no id is provided it
+ * will automatically set to a unique value.
+ *
  * @author Gary Russell
  * @since 1.0.1
  *
@@ -35,29 +43,32 @@ public class CorrelationData implements Correlation {
 
 	private final SettableListenableFuture<Confirm> future = new SettableListenableFuture<>();
 
-	@Nullable
 	private volatile String id;
 
-	private volatile Message returnedMessage;
+	private volatile ReturnedMessage returnedMessage;
 
 	/**
 	 * Construct an instance with a null Id.
 	 * @since 1.6.7
 	 */
 	public CorrelationData() {
-		super();
+		this.id = UUID.randomUUID().toString();
 	}
 
 	/**
 	 * Construct an instance with the supplied id. Must be unique if returns are enabled
-	 * to allow population of the {@link #setReturnedMessage(Message) returnedMessage}.
+	 * to allow population of the {@link #setReturned(ReturnedMessage) returned} message.
 	 * @param id the id.
 	 */
 	public CorrelationData(String id) {
+		Assert.notNull(id, "'id' cannot be null and must be unique");
 		this.id = id;
 	}
 
-	@Nullable
+	/**
+	 * Return the id.
+	 * @return the id.
+	 */
 	public String getId() {
 		return this.id;
 	}
@@ -65,14 +76,13 @@ public class CorrelationData implements Correlation {
 	/**
 	 * Set the correlation id. Generally, the correlation id shouldn't be changed.
 	 * One use case, however, is when it needs to be set in a
-	 * {@link org.springframework.amqp.core.MessagePostProcessor} after a
-	 * {@link CorrelationData} with a 'null' correlation id has been passed into a
-	 * {@link org.springframework.amqp.rabbit.core.RabbitTemplate}.
+	 * {@link org.springframework.amqp.core.MessagePostProcessor}.
 	 *
 	 * @param id the id.
 	 * @since 1.6
 	 */
 	public void setId(String id) {
+		Assert.notNull(id, "'id' cannot be null and must be unique");
 		this.id = id;
 	}
 
@@ -89,21 +99,51 @@ public class CorrelationData implements Correlation {
 	 * Return a returned message, if any; requires a unique
 	 * {@link #CorrelationData(String) id}. Guaranteed to be populated before the future
 	 * is set.
+	 * @deprecated in favor of {@link #getReturned()}.
 	 * @return the message or null.
 	 * @since 2.1
 	 */
+	@Deprecated
 	@Nullable
 	public Message getReturnedMessage() {
-		return this.returnedMessage;
+		if (this.returnedMessage == null) {
+			return null;
+		}
+		else {
+			return this.returnedMessage.getMessage();
+		}
 	}
 
 	/**
 	 * Set a returned message for this correlation data.
 	 * @param returnedMessage the returned message.
+	 * @deprecated in favor of {@link #setReturned(ReturnedMessage)}.
 	 * @since 1.7.13
 	 */
+	@Deprecated
 	public void setReturnedMessage(Message returnedMessage) {
-		this.returnedMessage = returnedMessage;
+		this.returnedMessage = new ReturnedMessage(returnedMessage, 0, "not available", "not available",
+				"not available");
+	}
+
+	/**
+	 * Get the returned message and metadata, if any. Guaranteed to be populated before
+	 * the future is set.
+	 * @return the {@link ReturnedMessage}.
+	 * @since 2.3.3
+	 */
+	@Nullable
+	public ReturnedMessage getReturned() {
+		return this.returnedMessage;
+	}
+
+	/**
+	 * Set the returned message and metadata.
+	 * @param returned the {@link ReturnedMessage}.
+	 * @since 2.3.3
+	 */
+	public void setReturned(ReturnedMessage returned) {
+		this.returnedMessage = returned;
 	}
 
 	@Override

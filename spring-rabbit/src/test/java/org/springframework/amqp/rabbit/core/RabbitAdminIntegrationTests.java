@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,12 @@ package org.springframework.amqp.rabbit.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.UUID;
 
-import org.junit.Assume;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -381,14 +382,14 @@ public class RabbitAdminIntegrationTests {
 		catch (AmqpIOException e) {
 			if (RabbitUtils.isExchangeDeclarationFailure(e)
 					&& e.getCause().getCause().getMessage().contains("exchange type 'x-delayed-message'")) {
-				Assume.assumeTrue("Broker does not have the delayed message exchange plugin installed", false);
+				return;
 			}
 			else {
 				throw e;
 			}
 		}
 		catch (@SuppressWarnings("unused") AutoRecoverConnectionNotCurrentlyOpenException e) {
-			Assume.assumeTrue("Broker does not have the delayed message exchange plugin installed", false);
+			return;
 		}
 		this.rabbitAdmin.declareQueue(queue);
 		this.rabbitAdmin.declareBinding(binding);
@@ -413,7 +414,6 @@ public class RabbitAdminIntegrationTests {
 		assertThat(System.currentTimeMillis() - t1).isGreaterThan(950L);
 
 		ExchangeInfo exchange2 = getExchange(exchangeName);
-		assertThat(exchange2).isNotNull();
 		assertThat(exchange2.getArguments().get("x-delayed-type")).isEqualTo(ExchangeTypes.DIRECT);
 		assertThat(exchange2.getType()).isEqualTo("x-delayed-message");
 
@@ -423,13 +423,8 @@ public class RabbitAdminIntegrationTests {
 
 	private ExchangeInfo getExchange(String exchangeName) throws Exception {
 		Client rabbitRestClient = new Client("http://localhost:15672/api/", "guest", "guest");
-		int n = 0;
-		ExchangeInfo exchange = rabbitRestClient.getExchange("/", exchangeName);
-		while (n++ < 100 && exchange == null) {
-			Thread.sleep(100);
-			exchange = rabbitRestClient.getExchange("/", exchangeName);
-		}
-		return exchange;
+		return await().pollDelay(Duration.ZERO)
+				.until(() -> rabbitRestClient.getExchange("/", exchangeName), exch -> exch != null);
 	}
 
 	/**

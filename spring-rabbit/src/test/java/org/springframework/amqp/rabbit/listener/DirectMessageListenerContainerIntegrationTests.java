@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2019 the original author or authors.
+ * Copyright 2016-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 package org.springframework.amqp.rabbit.listener;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -26,9 +27,10 @@ import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -36,13 +38,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.aopalliance.intercept.MethodInterceptor;
-import org.apache.commons.logging.LogFactory;
-import org.apache.logging.log4j.Level;
-import org.junit.AfterClass;
-import org.junit.ClassRule;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TestName;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.mockito.ArgumentCaptor;
 
 import org.springframework.amqp.core.Queue;
@@ -52,7 +52,10 @@ import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.junit.BrokerRunning;
-import org.springframework.amqp.rabbit.junit.LogLevelAdjuster;
+import org.springframework.amqp.rabbit.junit.BrokerRunningSupport;
+import org.springframework.amqp.rabbit.junit.LogLevels;
+import org.springframework.amqp.rabbit.junit.RabbitAvailable;
+import org.springframework.amqp.rabbit.junit.RabbitAvailableCondition;
 import org.springframework.amqp.rabbit.listener.DirectReplyToMessageListenerContainer.ChannelHolder;
 import org.springframework.amqp.rabbit.listener.adapter.MessageListenerAdapter;
 import org.springframework.amqp.rabbit.listener.adapter.ReplyingMessageListener;
@@ -79,39 +82,48 @@ import com.rabbitmq.client.Consumer;
  * @since 2.0
  *
  */
+@RabbitAvailable(queues = { DirectMessageListenerContainerIntegrationTests.Q1,
+		DirectMessageListenerContainerIntegrationTests.Q2,
+		DirectMessageListenerContainerIntegrationTests.EQ1,
+		DirectMessageListenerContainerIntegrationTests.EQ2,
+		DirectMessageListenerContainerIntegrationTests.DLQ1 })
+@LogLevels(classes = { CachingConnectionFactory.class, DirectReplyToMessageListenerContainer.class,
+			DirectMessageListenerContainer.class, DirectMessageListenerContainerIntegrationTests.class,
+			BrokerRunning.class }, level = "DEBUG")
 public class DirectMessageListenerContainerIntegrationTests {
 
-	private static final String Q1 = "testQ1";
+	public static final String Q1 = "testQ1.DirectMessageListenerContainerIntegrationTests";
 
-	private static final String Q2 = "testQ2";
+	public static final String Q2 = "testQ2.DirectMessageListenerContainerIntegrationTests";
 
-	private static final String EQ1 = "eventTestQ1";
+	public static final String EQ1 = "eventTestQ1.DirectMessageListenerContainerIntegrationTests";
 
-	private static final String EQ2 = "eventTestQ2";
+	public static final String EQ2 = "eventTestQ2.DirectMessageListenerContainerIntegrationTests";
 
-	private static final String DLQ1 = "testDLQ1";
+	public static final String DLQ1 = "testDLQ1.DirectMessageListenerContainerIntegrationTests";
 
-	@ClassRule
-	public static BrokerRunning brokerRunning = BrokerRunning.isRunningWithEmptyQueues(Q1, Q2, EQ1, EQ2, DLQ1);
+	private static final String MISSING = "missing.DirectMessageListenerContainerIntegrationTests";
 
-	private static CachingConnectionFactory adminCf =
-			new CachingConnectionFactory(brokerRunning.getConnectionFactory());
+	private static CachingConnectionFactory adminCf;
 
-	private static RabbitAdmin admin = new RabbitAdmin(adminCf);
+	private static RabbitAdmin admin;
 
-	@Rule
-	public LogLevelAdjuster adjuster = new LogLevelAdjuster(Level.DEBUG,
-			CachingConnectionFactory.class, DirectReplyToMessageListenerContainer.class,
-			DirectMessageListenerContainer.class, DirectMessageListenerContainerIntegrationTests.class,
-			BrokerRunning.class);
+	private String testName;
 
-	@Rule
-	public TestName testName = new TestName();
+	@BeforeAll
+	public static void setUp() {
+		adminCf = new CachingConnectionFactory(RabbitAvailableCondition.getBrokerRunning().getConnectionFactory());
+		admin = new RabbitAdmin(adminCf);
+	}
 
-	@AfterClass
+	@AfterAll
 	public static void tearDown() {
-		brokerRunning.removeTestQueues();
 		adminCf.destroy();
+	}
+
+	@BeforeEach
+	public void captureTestName(TestInfo info) {
+		this.testName = info.getDisplayName();
 	}
 
 	@SuppressWarnings("unchecked")
@@ -342,7 +354,7 @@ public class DirectMessageListenerContainerIntegrationTests {
 	}
 
 	@Test
-	public void testEvents() throws Exception {
+	public void testEvents(BrokerRunningSupport brokerRunning) throws Exception {
 		CachingConnectionFactory cf = new CachingConnectionFactory("localhost");
 		DirectMessageListenerContainer container = new DirectMessageListenerContainer(cf);
 		container.setQueueNames(EQ1, EQ2);
@@ -374,7 +386,7 @@ public class DirectMessageListenerContainerIntegrationTests {
 
 	@SuppressWarnings("unchecked")
 	@Test
-	public void testErrorHandler() throws Exception {
+	public void testErrorHandler(BrokerRunningSupport brokerRunning) throws Exception {
 		brokerRunning.deleteQueues(Q1);
 		Queue q1 = new Queue(Q1, true, false, false, new ArgumentBuilder()
 				.put("x-dead-letter-exchange", "")
@@ -422,11 +434,7 @@ public class DirectMessageListenerContainerIntegrationTests {
 
 		// Since backOff exhausting makes listenerContainer as invalid (calls stop()),
 		// it is enough to check the listenerContainer activity
-		int n = 0;
-		while (container.isActive() && n++ < 100) {
-			Thread.sleep(100);
-		}
-		assertThat(container.isActive()).isFalse();
+		await().until(() -> !container.isActive());
 	}
 
 	@Test
@@ -503,17 +511,17 @@ public class DirectMessageListenerContainerIntegrationTests {
 	}
 
 	@Test
-	public void testRecoverDeletedQueueAutoDeclare() throws Exception {
-		testRecoverDeletedQueueGuts(true);
+	public void testRecoverDeletedQueueAutoDeclare(BrokerRunningSupport brokerRunning) throws Exception {
+		testRecoverDeletedQueueGuts(true, brokerRunning);
 	}
 
 	@Test
-	public void testRecoverDeletedQueueNoAutoDeclare() throws Exception {
-		testRecoverDeletedQueueGuts(false);
+	public void testRecoverDeletedQueueNoAutoDeclare(BrokerRunningSupport brokerRunning) throws Exception {
+		testRecoverDeletedQueueGuts(false, brokerRunning);
 	}
 
 	@SuppressWarnings("unchecked")
-	private void testRecoverDeletedQueueGuts(boolean autoDeclare) throws Exception {
+	private void testRecoverDeletedQueueGuts(boolean autoDeclare, BrokerRunningSupport brokerRunning) throws Exception {
 		CachingConnectionFactory cf = new CachingConnectionFactory("localhost");
 		DirectMessageListenerContainer container = new DirectMessageListenerContainer(cf);
 		if (autoDeclare) {
@@ -627,11 +635,7 @@ public class DirectMessageListenerContainerIntegrationTests {
 		container.afterPropertiesSet();
 		container.start();
 
-		int n = 0;
-		while (n++ < 100 && container.isRunning()) {
-			Thread.sleep(100);
-		}
-		assertThat(container.isRunning()).isFalse();
+		await().until(() -> !container.isActive());
 	}
 
 	@Test
@@ -654,11 +658,7 @@ public class DirectMessageListenerContainerIntegrationTests {
 		assertThat(latch.await(10, TimeUnit.SECONDS)).isTrue();
 		cf.onApplicationEvent(new ContextClosedEvent(context));
 		cf.destroy();
-		int n = 0;
-		while (n++ < 100 && container.isRunning()) {
-			Thread.sleep(100);
-		}
-		assertThat(container.isRunning()).isFalse();
+		await().until(() -> !container.isActive());
 	}
 
 	@Test
@@ -682,35 +682,52 @@ public class DirectMessageListenerContainerIntegrationTests {
 		cf.destroy();
 	}
 
+	@Test
+	void missingQueueOnStart() throws InterruptedException {
+		CachingConnectionFactory cf = new CachingConnectionFactory("localhost");
+		RabbitAdmin admin = new RabbitAdmin(cf);
+		admin.deleteQueue(MISSING);
+		DirectMessageListenerContainer container = new DirectMessageListenerContainer(cf);
+		container.setQueueNames(MISSING);
+		container.setBeanName("missingQOnStart");
+		final CountDownLatch latch = new CountDownLatch(1);
+		container.setApplicationEventPublisher(event -> {
+			if (event instanceof MissingQueueEvent) {
+				admin.declareQueue(new Queue(MISSING));
+			}
+			else if (event instanceof AsyncConsumerStartedEvent) {
+				latch.countDown();
+			}
+		});
+		container.setMonitorInterval(500);
+		container.setFailedDeclarationRetryInterval(500);
+		container.afterPropertiesSet();
+		container.start();
+		assertThat(latch.await(10, TimeUnit.SECONDS)).isTrue();
+		container.stop();
+		admin.deleteQueue(MISSING);
+		cf.destroy();
+	}
+
 	private boolean consumersOnQueue(String queue, int expected) throws Exception {
-		int n = 0;
-		Properties queueProperties = admin.getQueueProperties(queue);
-		LogFactory.getLog(getClass()).debug(queue + " waiting for " + expected + " : " + queueProperties);
-		while (n++ < 600
-				&& (queueProperties == null || !queueProperties.get(RabbitAdmin.QUEUE_CONSUMER_COUNT).equals(expected))) {
-			Thread.sleep(100);
-			queueProperties = admin.getQueueProperties(queue);
-			LogFactory.getLog(getClass()).debug(queue + " waiting for " + expected + " : " + queueProperties);
-		}
-		return queueProperties.get(RabbitAdmin.QUEUE_CONSUMER_COUNT).equals(expected);
+		await().with().pollDelay(Duration.ZERO).atMost(Duration.ofSeconds(60))
+				.until(() -> admin.getQueueProperties(queue),
+						props -> props != null && props.get(RabbitAdmin.QUEUE_CONSUMER_COUNT).equals(expected));
+		return true;
 	}
 
 	private boolean activeConsumerCount(AbstractMessageListenerContainer container, int expected) throws Exception {
-		int n = 0;
 		List<?> consumers = TestUtils.getPropertyValue(container, "consumers", List.class);
-		while (n++ < 600 && consumers.size() != expected) {
-			Thread.sleep(100);
-		}
-		return consumers.size() == expected;
+		await().with().pollDelay(Duration.ZERO).atMost(Duration.ofSeconds(60))
+				.until(() -> consumers.size() == expected);
+		return true;
 	}
 
 	private boolean restartConsumerCount(AbstractMessageListenerContainer container, int expected) throws Exception {
-		int n = 0;
-		List<?> consumers = TestUtils.getPropertyValue(container, "consumersToRestart", List.class);
-		while (n++ < 600 && consumers.size() != expected) {
-			Thread.sleep(100);
-		}
-		return consumers.size() == expected;
+		Set<?> consumers = TestUtils.getPropertyValue(container, "consumersToRestart", Set.class);
+		await().with().pollDelay(Duration.ZERO).atMost(Duration.ofSeconds(60))
+				.until(() -> consumers.size() == expected);
+		return true;
 	}
 
 	public class Tag implements ConsumerTagStrategy {
@@ -719,7 +736,7 @@ public class DirectMessageListenerContainerIntegrationTests {
 
 		@Override
 		public String createConsumerTag(String queue) {
-			return queue + "/" + DirectMessageListenerContainerIntegrationTests.this.testName.getMethodName() + n++;
+			return queue + "/" + DirectMessageListenerContainerIntegrationTests.this.testName + n++;
 		}
 
 	}

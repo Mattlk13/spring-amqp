@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,8 @@ import org.springframework.core.MethodParameter;
 import org.springframework.lang.Nullable;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessagingException;
+import org.springframework.messaging.handler.annotation.Header;
+import org.springframework.messaging.handler.annotation.Headers;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.remoting.support.RemoteInvocationResult;
@@ -57,6 +59,7 @@ import com.rabbitmq.client.Channel;
  * @author Stephane Nicoll
  * @author Gary Russell
  * @author Artem Bilan
+ * @author Kai Stapel
  *
  * @since 1.4
  */
@@ -140,6 +143,10 @@ public class MessagingMessageListenerAdapter extends AbstractAdaptableMessageLis
 		}
 		InvocationResult result = null;
 		try {
+			if (this.messagingMessageConverter.method == null && amqpMessage != null) {
+				amqpMessage.getMessageProperties()
+						.setTargetMethod(this.handlerAdapter.getMethodFor(message.getPayload()));
+			}
 			result = invokeHandler(amqpMessage, channel, message);
 			if (result.getReturnValue() != null) {
 				handleResult(result, amqpMessage, channel, message);
@@ -175,15 +182,19 @@ public class MessagingMessageListenerAdapter extends AbstractAdaptableMessageLis
 
 	private void returnOrThrow(org.springframework.amqp.core.Message amqpMessage, Channel channel, Message<?> message,
 			Throwable throwableToReturn, Exception exceptionToThrow) throws Exception { // NOSONAR
+
 		if (!this.returnExceptions) {
 			throw exceptionToThrow;
 		}
 		try {
-			handleResult(new InvocationResult(new RemoteInvocationResult(throwableToReturn), null, null),
+			handleResult(new InvocationResult(new RemoteInvocationResult(throwableToReturn), null,
+						this.handlerAdapter.getReturnTypeFor(message.getPayload()),
+						this.handlerAdapter.getBean(),
+						this.handlerAdapter.getMethodFor(message.getPayload())),
 					amqpMessage, channel, message);
 		}
 		catch (ReplyFailureException rfe) {
-			if (void.class.equals(this.handlerAdapter.getReturnType(message.getPayload()))) {
+			if (void.class.equals(this.handlerAdapter.getReturnTypeFor(message.getPayload()))) {
 				throw exceptionToThrow;
 			}
 			else {
@@ -243,7 +254,7 @@ public class MessagingMessageListenerAdapter extends AbstractAdaptableMessageLis
 				return this.messagingMessageConverter.toMessage(result, new MessageProperties());
 			}
 			else {
-				return converter.toMessage(result, new MessageProperties(), genericType);
+				return convert(result, genericType, converter);
 			}
 		}
 		else {
@@ -267,7 +278,7 @@ public class MessagingMessageListenerAdapter extends AbstractAdaptableMessageLis
 
 		private final Object bean;
 
-		private final Method method;
+		final Method method; // NOSONAR visibility
 
 		private final Type inferredArgumentType;
 
@@ -314,7 +325,7 @@ public class MessagingMessageListenerAdapter extends AbstractAdaptableMessageLis
 			return extractMessage(message);
 		}
 
-		private Type determineInferredType() {
+		private Type determineInferredType() { // NOSONAR - complexity
 			if (this.method == null) {
 				return null;
 			}
@@ -324,12 +335,20 @@ public class MessagingMessageListenerAdapter extends AbstractAdaptableMessageLis
 			for (int i = 0; i < this.method.getParameterCount(); i++) {
 				MethodParameter methodParameter = new MethodParameter(this.method, i);
 				/*
-				 * We're looking for a single non-annotated parameter, or one annotated with @Payload.
+				 * We're looking for a single parameter, or one annotated with @Payload.
 				 * We ignore parameters with type Message because they are not involved with conversion.
 				 */
-				if (isEligibleParameter(methodParameter)
-						&& (methodParameter.getParameterAnnotations().length == 0
-						|| methodParameter.hasParameterAnnotation(Payload.class))) {
+				boolean isHeaderOrHeaders = methodParameter.hasParameterAnnotation(Header.class)
+						|| methodParameter.hasParameterAnnotation(Headers.class);
+				boolean isPayload = methodParameter.hasParameterAnnotation(Payload.class);
+				if (isHeaderOrHeaders && isPayload && MessagingMessageListenerAdapter.this.logger.isWarnEnabled()) {
+					MessagingMessageListenerAdapter.this.logger.warn(this.method.getName()
+						+ ": Cannot annotate a parameter with both @Header and @Payload; "
+						+ "ignored for payload conversion");
+				}
+				if (isEligibleParameter(methodParameter) // NOSONAR
+						&& (!isHeaderOrHeaders || isPayload) && !(isHeaderOrHeaders && isPayload)) {
+
 					if (genericParameterType == null) {
 						genericParameterType = extractGenericParameterTypFromMethodParameter(methodParameter);
 					}
@@ -373,7 +392,8 @@ public class MessagingMessageListenerAdapter extends AbstractAdaptableMessageLis
 				if (parameterizedType.getRawType().equals(Message.class)) {
 					genericParameterType = ((ParameterizedType) genericParameterType).getActualTypeArguments()[0];
 				}
-				else if (parameterizedType.getRawType().equals(List.class)
+				else if (this.isBatch
+						&& parameterizedType.getRawType().equals(List.class)
 						&& parameterizedType.getActualTypeArguments().length == 1) {
 
 					Type paramType = parameterizedType.getActualTypeArguments()[0];
@@ -384,7 +404,7 @@ public class MessagingMessageListenerAdapter extends AbstractAdaptableMessageLis
 					if (messageHasGeneric) {
 						genericParameterType = ((ParameterizedType) paramType).getActualTypeArguments()[0];
 					}
-					if (this.isBatch) {
+					else {
 						// when decoding batch messages we convert to the List's generic type
 						genericParameterType = paramType;
 					}

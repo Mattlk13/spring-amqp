@@ -53,7 +53,7 @@ public @interface LogLevels {
 
 	/**
 	 * The Log4j level name to switch the categories to during the test.
-	 * @return the level.
+	 * @return the level (default Log4j {@code Levels.toLevel()} - currently, DEBUG).
 	 */
 	String level() default "";
 

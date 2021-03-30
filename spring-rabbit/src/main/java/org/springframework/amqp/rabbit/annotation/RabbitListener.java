@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2019 the original author or authors.
+ * Copyright 2014-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -116,10 +116,15 @@ public @interface RabbitListener {
 	String id() default "";
 
 	/**
-	 * The bean name of the {@link org.springframework.amqp.rabbit.listener.RabbitListenerContainerFactory}
-	 * to use to create the message listener container responsible to serve this endpoint.
-	 * <p>If not specified, the default container factory is used, if any.
-	 * @return the {@link org.springframework.amqp.rabbit.listener.RabbitListenerContainerFactory}
+	 * The bean name of the
+	 * {@link org.springframework.amqp.rabbit.listener.RabbitListenerContainerFactory} to
+	 * use to create the message listener container responsible to serve this endpoint.
+	 * <p>
+	 * If not specified, the default container factory is used, if any. If a SpEL
+	 * expression is provided ({@code #{...}}), the expression can either evaluate to a
+	 * container factory instance or a bean name.
+	 * @return the
+	 * {@link org.springframework.amqp.rabbit.listener.RabbitListenerContainerFactory}
 	 * bean name.
 	 */
 	String containerFactory() default "";
@@ -166,12 +171,14 @@ public @interface RabbitListener {
 	String priority() default "";
 
 	/**
-	 * Reference to a {@link org.springframework.amqp.rabbit.core.RabbitAdmin
-	 * RabbitAdmin}. Required if the listener is using auto-delete
-	 * queues and those queues are configured for conditional declaration. This
-	 * is the admin that will (re)declare those queues when the container is
-	 * (re)started. See the reference documentation for more information.
-	 * @return the {@link org.springframework.amqp.rabbit.core.RabbitAdmin} bean name.
+	 * Reference to a {@link org.springframework.amqp.core.AmqpAdmin AmqpAdmin}.
+	 * Required if the listener is using auto-delete queues and those queues are
+	 * configured for conditional declaration. This is the admin that will (re)declare
+	 * those queues when the container is (re)started. See the reference documentation for
+	 * more information. If a SpEL expression is provided ({@code #{...}}) the expression
+	 * can evaluate to an {@link org.springframework.amqp.core.AmqpAdmin} instance
+	 * or bean name.
+	 * @return the {@link org.springframework.amqp.core.AmqpAdmin} bean name.
 	 */
 	String admin() default "";
 
@@ -246,8 +253,10 @@ public @interface RabbitListener {
 	String autoStartup() default "";
 
 	/**
-	 * Set the task executor bean name to use for this listener's container; overrides
-	 * any executor set on the container factory.
+	 * Set the task executor bean name to use for this listener's container; overrides any
+	 * executor set on the container factory. If a SpEL expression is provided
+	 * ({@code #{...}}), the expression can either evaluate to a executor instance or a bean
+	 * name.
 	 * @return the executor bean name.
 	 * @since 2.2
 	 */
@@ -262,5 +271,61 @@ public @interface RabbitListener {
 	 * @since 2.2
 	 */
 	String ackMode() default "";
+
+	/**
+	 * The bean name of a
+	 * {@link org.springframework.amqp.rabbit.listener.adapter.ReplyPostProcessor} to post
+	 * process a response before it is sent. If a SpEL expression is provided
+	 * ({@code #{...}}), the expression can either evaluate to a post processor instance
+	 * or a bean name.
+	 * @return the bean name.
+	 * @since 2.2.5
+	 * @see org.springframework.amqp.rabbit.listener.adapter.AbstractAdaptableMessageListener#setReplyPostProcessor(org.springframework.amqp.rabbit.listener.adapter.ReplyPostProcessor)
+	 */
+	String replyPostProcessor() default "";
+
+	/**
+	 * Override the container factory's message converter used for this listener.
+	 * @return the message converter bean name. If a SpEL expression is provided
+	 * ({@code #{...}}), the expression can either evaluate to a converter instance
+	 * or a bean name.
+	 * @since 2.3
+	 */
+	String messageConverter() default "";
+
+	/**
+	 * Used to set the content type of a reply message. Useful when used in conjunction
+	 * with message converters that can handle multiple content types, such as the
+	 * {@link org.springframework.amqp.support.converter.ContentTypeDelegatingMessageConverter}.
+	 * SpEL expressions and property placeholders are supported. Also useful if you wish to
+	 * control the final content type property when used with certain converters. This does
+	 * not apply when the return type is {@link org.springframework.amqp.core.Message} or
+	 * {@link org.springframework.messaging.Message}; set the content type message property
+	 * or header respectively, in those cases.
+	 * @return the content type.
+	 * @since 2.3
+	 * @see #converterWinsContentType()
+	 */
+	String replyContentType() default "";
+
+	/**
+	 * Set to 'false' to override any content type headers set by the message converter
+	 * with the value of the 'replyContentType' property. Some converters, such as the
+	 * {@link org.springframework.amqp.support.converter.SimpleMessageConverter} use the
+	 * payload type and set the content type header appropriately. For example, if you set
+	 * the 'replyContentType' to "application/json" and use the simple message converter
+	 * when returning a String containing JSON, the converter will overwrite the content
+	 * type to 'text/plain'. Set this to false, to prevent that action. This does not
+	 * apply when the return type is {@link org.springframework.amqp.core.Message} because
+	 * there is no conversion involved. When returning a
+	 * {@link org.springframework.messaging.Message}, set the content type message header
+	 * and
+	 * {@link org.springframework.amqp.support.AmqpHeaders#CONTENT_TYPE_CONVERTER_WINS} to
+	 * false.
+	 * @return false to use the replyContentType.
+	 * @since 2.3
+	 * @see #replyContentType()
+	 */
+	String converterWinsContentType() default "true";
 
 }

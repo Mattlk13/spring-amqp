@@ -23,13 +23,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.springframework.amqp.ImmediateRequeueAmqpException;
@@ -43,16 +42,17 @@ import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.rabbit.junit.BrokerRunning;
+import org.springframework.amqp.rabbit.junit.RabbitAvailable;
+import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
+import org.springframework.amqp.utils.test.TestUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Component;
 import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.ContextConfiguration;
-import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
+import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.util.concurrent.ListenableFuture;
 import org.springframework.util.concurrent.SettableListenableFuture;
 
@@ -63,13 +63,10 @@ import reactor.core.publisher.Mono;
  * @since 2.1
  *
  */
-@ContextConfiguration
-@RunWith(SpringJUnit4ClassRunner.class)
+@SpringJUnitConfig
 @DirtiesContext
+@RabbitAvailable
 public class AsyncListenerTests {
-
-	@Rule
-	public BrokerRunning brokerRunning = BrokerRunning.isRunning();
 
 	@Autowired
 	private EnableRabbitConfig config;
@@ -104,6 +101,9 @@ public class AsyncListenerTests {
 	@Autowired
 	private Listener listener;
 
+	@Autowired
+	private RabbitListenerEndpointRegistry registry;
+
 	@Test
 	public void testAsyncListener() throws Exception {
 		assertThat(this.rabbitTemplate.convertSendAndReceive(this.queue1.getName(), "foo")).isEqualTo("FOO");
@@ -132,6 +132,12 @@ public class AsyncListenerTests {
 	@Test
 	public void testOverrideDontRequeue() throws Exception {
 		assertThat(this.rabbitTemplate.convertSendAndReceive(this.queue7.getName(), "foo")).isEqualTo("listen7");
+	}
+
+	@Test
+	public void testAuthByProps() {
+		assertThat(TestUtils.getPropertyValue(this.registry.getListenerContainer("foo"),
+				"possibleAuthenticationFailureFatal", Boolean.class)).isFalse();
 	}
 
 	@Configuration
@@ -251,6 +257,13 @@ public class AsyncListenerTests {
 		@Bean
 		public Listener listener() {
 			return new Listener();
+		}
+
+		@Bean("spring.amqp.global.properties")
+		public Properties properties() {
+			Properties props = new Properties();
+			props.setProperty("mlc.possible.authentication.failure.fatal", "false");
+			return props;
 		}
 
 	}

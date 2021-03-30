@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2019 the original author or authors.
+ * Copyright 2014-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 package org.springframework.amqp.rabbit.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
@@ -38,7 +39,7 @@ import org.springframework.amqp.core.QueueBuilder.MasterLocator;
 import org.springframework.amqp.core.QueueBuilder.Overflow;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
-import org.springframework.amqp.rabbit.junit.BrokerRunning;
+import org.springframework.amqp.rabbit.junit.BrokerRunningSupport;
 import org.springframework.amqp.rabbit.junit.RabbitAvailable;
 import org.springframework.amqp.rabbit.junit.RabbitAvailableCondition;
 import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
@@ -64,7 +65,7 @@ import com.rabbitmq.http.client.domain.QueueInfo;
 @RabbitAvailable(management = true)
 public class FixedReplyQueueDeadLetterTests {
 
-	private static BrokerRunning brokerRunning;
+	private static BrokerRunningSupport brokerRunning;
 
 	@Autowired
 	private RabbitTemplate rabbitTemplate;
@@ -79,7 +80,7 @@ public class FixedReplyQueueDeadLetterTests {
 
 	@AfterAll
 	static void tearDown() {
-		brokerRunning.deleteQueues("all.args.1", "all.args.2", "all.args.3");
+		brokerRunning.deleteQueues("all.args.1", "all.args.2", "all.args.3", "test.quorum");
 	}
 
 	/**
@@ -90,21 +91,16 @@ public class FixedReplyQueueDeadLetterTests {
 	 * @throws Exception the exception.
 	 */
 	@Test
-	public void test() throws Exception {
+	void test() throws Exception {
 		assertThat(this.rabbitTemplate.convertSendAndReceive("foo")).isNull();
 		assertThat(this.deadListener.latch.await(10, TimeUnit.SECONDS)).isTrue();
 	}
 
 	@Test
-	public void testQueueArgs1() throws MalformedURLException, URISyntaxException, InterruptedException {
+	void testQueueArgs1() throws MalformedURLException, URISyntaxException, InterruptedException {
 		Client client = new Client(brokerRunning.getAdminUri(), brokerRunning.getAdminUser(),
 				brokerRunning.getAdminPassword());
-		QueueInfo queue = client.getQueue("/", "all.args.1");
-		int n = 0;
-		while (n++ < 100 && queue == null) {
-			Thread.sleep(100);
-			queue = client.getQueue("/", "all.args.1");
-		}
+		QueueInfo queue = await().until(() -> client.getQueue("/", "all.args.1"), que -> que != null);
 		Map<String, Object> arguments = queue.getArguments();
 		assertThat(arguments.get("x-message-ttl")).isEqualTo(1000);
 		assertThat(arguments.get("x-expires")).isEqualTo(200_000);
@@ -116,18 +112,14 @@ public class FixedReplyQueueDeadLetterTests {
 		assertThat(arguments.get("x-max-priority")).isEqualTo(4);
 		assertThat(arguments.get("x-queue-mode")).isEqualTo("lazy");
 		assertThat(arguments.get("x-queue-master-locator")).isEqualTo("min-masters");
+		assertThat(arguments.get("x-single-active-consumer")).isEqualTo(Boolean.TRUE);
 	}
 
 	@Test
-	public void testQueueArgs2() throws MalformedURLException, URISyntaxException, InterruptedException {
+	void testQueueArgs2() throws MalformedURLException, URISyntaxException, InterruptedException {
 		Client client = new Client(brokerRunning.getAdminUri(), brokerRunning.getAdminUser(),
 				brokerRunning.getAdminPassword());
-		QueueInfo queue = client.getQueue("/", "all.args.2");
-		int n = 0;
-		while (n++ < 100 && queue == null) {
-			Thread.sleep(100);
-			queue = client.getQueue("/", "all.args.1");
-		}
+		QueueInfo queue = await().until(() -> client.getQueue("/", "all.args.2"), que -> que != null);
 		Map<String, Object> arguments = queue.getArguments();
 		assertThat(arguments.get("x-message-ttl")).isEqualTo(1000);
 		assertThat(arguments.get("x-expires")).isEqualTo(200_000);
@@ -142,15 +134,10 @@ public class FixedReplyQueueDeadLetterTests {
 	}
 
 	@Test
-	public void testQueueArgs3() throws MalformedURLException, URISyntaxException, InterruptedException {
+	void testQueueArgs3() throws MalformedURLException, URISyntaxException, InterruptedException {
 		Client client = new Client(brokerRunning.getAdminUri(), brokerRunning.getAdminUser(),
 				brokerRunning.getAdminPassword());
-		QueueInfo queue = client.getQueue("/", "all.args.3");
-		int n = 0;
-		while (n++ < 100 && queue == null) {
-			Thread.sleep(100);
-			queue = client.getQueue("/", "all.args.1");
-		}
+		QueueInfo queue = await().until(() -> client.getQueue("/", "all.args.3"), que -> que != null);
 		Map<String, Object> arguments = queue.getArguments();
 		assertThat(arguments.get("x-message-ttl")).isEqualTo(1000);
 		assertThat(arguments.get("x-expires")).isEqualTo(200_000);
@@ -165,7 +152,20 @@ public class FixedReplyQueueDeadLetterTests {
 
 		ExchangeInfo exchange = client.getExchange("/", "dlx.test.requestEx");
 		assertThat(exchange.getArguments().get("alternate-exchange")).isEqualTo("alternate");
-}
+	}
+
+	/*
+	 * Does not require a 3.8 broker - they are just arbitrary arguments.
+	 */
+	@Test
+	void testQuorumArgs() throws MalformedURLException, URISyntaxException, InterruptedException {
+		Client client = new Client(brokerRunning.getAdminUri(), brokerRunning.getAdminUser(),
+				brokerRunning.getAdminPassword());
+		QueueInfo queue = await().until(() -> client.getQueue("/", "test.quorum"), que -> que != null);
+		Map<String, Object> arguments = queue.getArguments();
+		assertThat(arguments.get("x-queue-type")).isEqualTo("quorum");
+		assertThat(arguments.get("x-delivery-limit")).isEqualTo(10);
+	}
 
 	@Configuration
 	public static class FixedReplyQueueDeadLetterConfig {
@@ -295,6 +295,7 @@ public class FixedReplyQueueDeadLetterTests {
 					.maxPriority(4)
 					.lazy()
 					.masterLocator(MasterLocator.minMasters)
+					.singleActiveConsumer()
 					.build();
 		}
 
@@ -327,6 +328,14 @@ public class FixedReplyQueueDeadLetterTests {
 					.maxPriority(4)
 					.lazy()
 					.masterLocator(MasterLocator.random)
+					.build();
+		}
+
+		@Bean
+		public Queue quorum() {
+			return QueueBuilder.durable("test.quorum")
+					.quorum()
+					.deliveryLimit(10)
 					.build();
 		}
 

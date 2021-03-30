@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.concurrent.Executor;
 
 import org.aopalliance.aop.Advice;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.core.MessagePostProcessor;
@@ -103,7 +103,7 @@ public class RabbitListenerContainerFactoryTests {
 		this.factory.setRecoveryBackOff(recoveryBackOff);
 		this.factory.setMissingQueuesFatal(true);
 		this.factory.setAfterReceivePostProcessors(afterReceivePostProcessor);
-		this.factory.setContainerConfigurer(c -> c.setShutdownTimeout(10_000));
+		this.factory.setContainerCustomizer(c -> c.setShutdownTimeout(10_000));
 
 		assertThat(this.factory.getAdviceChain()).isEqualTo(new Advice[]{advice});
 
